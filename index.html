@@ -1,0 +1,1567 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#155bb5" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>SOFTOY FOOTBALL 3D</title>
+
+  <style>
+    html,body{height:100%;margin:0;background:#80c7ff;font-family:Arial,Helvetica,sans-serif;overflow:hidden}
+    canvas{display:block}
+    #installBtn{
+      position:fixed;
+      right:18px;
+      bottom:90px;
+      z-index:300;
+      display:none;
+      background:#155bb5;
+      color:white;
+      border:none;
+      padding:12px 16px;
+      border-radius:8px;
+      font-weight:bold;
+      box-shadow:0 4px 10px rgba(0,0,0,0.3);
+      touch-action:manipulation;
+    }
+    /* Touch buttons and joystick styles from game code (so they are visible) */
+    .touch-button{position:fixed;right:18px;bottom:25px;background:#155bb5;color:#fff;border:none;border-radius:12px;padding:12px 14px;font-size:18px;z-index:20}
+    .touch-button.sprint{right:18px;bottom:140px}
+    #joystick{background:rgba(0,0,0,0.12)}
+    /* Simple body reset for the overlay UI created by your game.js */
+    button{font-family:inherit}
+  </style>
+</head>
+<body>
+  <button id="installBtn">Install App</button>
+
+  <!-- three.js from CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.min.js"></script>
+
+  <script>
+    /*
+      This page creates the manifest and service worker at runtime using blob URLs,
+      then registers the service worker and sets up the beforeinstallprompt handler.
+      The game's full source is inlined later in this file.
+    */
+
+    // 1) Create a simple SVG icon and expose it as a blob URL (used in manifest).
+    const svgIcon = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="100%" height="100%" rx="160" fill="#155bb5"/>
+  <circle cx="512" cy="420" r="220" fill="#fff"/>
+  <text x="512" y="720" font-size="180" font-family="Arial" fill="#fff" text-anchor="middle">⚽</text>
+</svg>`;
+    const iconBlob = new Blob([svgIcon], {type: 'image/svg+xml'});
+    const iconURL = URL.createObjectURL(iconBlob);
+
+    // 2) Create the manifest JSON and expose it as a blob URL.
+    const manifest = {
+      name: "SOFTOY FOOTBALL 3D",
+      short_name: "Softoy",
+      description: "A cute mini 3D football game.",
+      start_url: ".",
+      display: "standalone",
+      orientation: "portrait",
+      background_color: "#80c7ff",
+      theme_color: "#155bb5",
+      icons: [
+        { src: iconURL, sizes: "512x512", type: "image/svg+xml" },
+        { src: iconURL, sizes: "192x192", type: "image/svg+xml" }
+      ]
+    };
+    const manifestBlob = new Blob([JSON.stringify(manifest)], {type: 'application/json'});
+    const manifestURL = URL.createObjectURL(manifestBlob);
+    const link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = manifestURL;
+    document.head.appendChild(link);
+
+    // 3) Create a small offline HTML (the SW will cache it).
+    const offlineHtml = `
+      <!doctype html>
+      <html>
+      <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Offline - SOFTOY</title>
+      <style>body{font-family:Arial,Helvetica,sans-serif;background:#80c7ff;color:#fff;text-align:center;padding:40px}a{color:#fff;font-weight:bold}</style>
+      </head>
+      <body>
+        <h1>You're offline</h1>
+        <p>The game is not available right now. Try again when you have an internet connection.</p>
+        <p><a href="./">Return</a></p>
+      </body>
+      </html>
+    `;
+
+    // 4) Service Worker source as a string. It will be converted to a blob and registered.
+    const swSource = `
+      const CACHE_NAME = 'softoy-cache-v1';
+      const ASSETS = [
+        '/',             // index
+        // We'll try to cache the CDN three.js too (network permitting)
+        'https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.min.js'
+      ];
+
+      self.addEventListener('install', event => {
+        self.skipWaiting();
+        event.waitUntil((async () => {
+          const cache = await caches.open(CACHE_NAME);
+          // Cache the assets and create an offline.html entry from the install message if provided.
+          try {
+            await cache.addAll(ASSETS);
+          } catch (e) {
+            // ignore individual failures
+          }
+          // offline.html content will be provided by the registration page via postMessage.
+        })());
+      });
+
+      self.addEventListener('activate', event => {
+        event.waitUntil((async () => {
+          const keys = await caches.keys();
+          await Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)));
+          await self.clients.claim();
+        })());
+      });
+
+      // Receive offline.html content (string) from the page and cache it under /offline.html
+      self.addEventListener('message', async (ev) => {
+        if (ev.data && ev.data.type === 'OFFLINE_HTML' && typeof ev.data.html === 'string') {
+          const cache = await caches.open(CACHE_NAME);
+          const resp = new Response(ev.data.html, {headers: {'Content-Type':'text/html'}});
+          await cache.put('/offline.html', resp);
+        }
+      });
+
+      self.addEventListener('fetch', event => {
+        // Navigation requests: network-first then fallback to cache (index or offline)
+        if (event.request.mode === 'navigate') {
+          event.respondWith((async () => {
+            try {
+              const networkResponse = await fetch(event.request);
+              // optionally update the cache in the background
+              const cache = await caches.open(CACHE_NAME);
+              cache.put(event.request, networkResponse.clone()).catch(()=>{});
+              return networkResponse;
+            } catch (err) {
+              const cache = await caches.open(CACHE_NAME);
+              return (await cache.match(event.request)) || (await cache.match('/')) || (await cache.match('/offline.html'));
+            }
+          })());
+          return;
+        }
+
+        // For other assets: cache-first then network
+        event.respondWith((async () => {
+          const cache = await caches.open(CACHE_NAME);
+          const cached = await cache.match(event.request);
+          if (cached) return cached;
+          try {
+            const fetched = await fetch(event.request);
+            return fetched;
+          } catch (e) {
+            // fallback to offline.html for document-like requests
+            if (event.request.destination === 'document') {
+              const c = await cache.match('/offline.html');
+              if (c) return c;
+            }
+            throw e;
+          }
+        })());
+      });
+    `;
+
+    // 5) Register the service worker using a blob URL.
+    async function registerInlineSW() {
+      if (!('serviceWorker' in navigator)) return;
+      try {
+        const swBlob = new Blob([swSource], {type: 'text/javascript'});
+        const swURL = URL.createObjectURL(swBlob);
+        const reg = await navigator.serviceWorker.register(swURL, {scope: './'});
+        console.log('SW registered with scope', reg.scope);
+
+        // Send offline.html to SW so it can cache it under /offline.html
+        if (reg.active) {
+          reg.active.postMessage({type:'OFFLINE_HTML', html: offlineHtml});
+        } else if (reg.installing) {
+          // wait a bit and then post
+          const swr = reg.installing;
+          swr.addEventListener('statechange', () => {
+            if (reg.active) reg.active.postMessage({type:'OFFLINE_HTML', html: offlineHtml});
+          });
+        }
+      } catch (err) {
+        console.warn('SW register failed', err);
+      }
+    }
+
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', registerInlineSW);
+    }
+
+    // 6) beforeinstallprompt handling for Chromium-based browsers
+    let deferredPrompt;
+    const installBtn = document.getElementById('installBtn');
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      installBtn.style.display = 'block';
+    });
+
+    installBtn.addEventListener('click', async () => {
+      installBtn.style.display = 'none';
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      const choice = await deferredPrompt.userChoice;
+      console.log('User choice', choice);
+      deferredPrompt = null;
+    });
+
+    // iOS hint
+    window.addEventListener('load', () => {
+      const isIos = /iphone|ipad|ipod/.test(window.navigator.userAgent.toLowerCase());
+      const isInStandalone = ('standalone' in window.navigator) && window.navigator.standalone;
+      if (isIos && !isInStandalone) {
+        if (!localStorage.getItem('iosAddToHomeHint')) {
+          // Small non-blocking hint for iOS users.
+          setTimeout(() => alert('Tip: to add to Home Screen on iOS tap Share → Add to Home Screen'), 700);
+          localStorage.setItem('iosAddToHomeHint', '1');
+        }
+      }
+    });
+  </script>
+
+  <!-- ============================================================
+       Inlined game.js starts here
+       (your full game source) - no external game.js required
+       ============================================================ -->
+  <script>
+/* ============================================================
+   SOFTOY FOOTBALL 3D - inlined single-file version
+   (Unmodified game logic, inlined into index.html)
+   ============================================================ */
+
+"use strict";
+
+// ============================================================
+// GAME DATA
+// ============================================================
+
+const Game = {
+    screen: "menu",
+
+    selectedPlayer: null,
+
+    score: {
+        softoy: 0,
+        opponent: 0
+    },
+
+    matchTime: 180,
+
+    running: false,
+
+    rank: 1,
+
+    xp: 0,
+
+    players: [
+        {
+            id: "tb",
+            name: "T-B",
+            number: 10,
+            speed: 7,
+            shooting: 9,
+            passing: 8,
+            defending: 7,
+            color: 0xd99b6c
+        },
+
+        {
+            id: "ybear",
+            name: "Ybear",
+            number: 11,
+            speed: 8,
+            shooting: 8,
+            passing: 8,
+            defending: 6,
+            color: 0xc58a55
+        },
+
+        {
+            id: "hog",
+            name: "Hog",
+            number: 4,
+            speed: 9,
+            shooting: 8,
+            passing: 7,
+            defending: 6,
+            color: 0x9a7050
+        },
+
+        {
+            id: "roary",
+            name: "Roary",
+            number: 3,
+            speed: 8,
+            shooting: 7,
+            passing: 7,
+            defending: 9,
+            color: 0xd37d35
+        }
+    ]
+};
+
+// ============================================================
+// RANKS
+// ============================================================
+
+const ranks = [
+    "Rookie",
+    "Bronze",
+    "Silver",
+    "Gold",
+    "Platinum",
+    "Diamond",
+    "Champion",
+    "Legend"
+];
+
+// ============================================================
+// THREE.JS
+// ============================================================
+
+const scene = new THREE.Scene();
+
+scene.background =
+    new THREE.Color(0x80c7ff);
+
+scene.fog =
+    new THREE.Fog(
+        0x80c7ff,
+        50,
+        120
+    );
+
+// CAMERA
+
+const camera =
+    new THREE.PerspectiveCamera(
+        60,
+        window.innerWidth /
+        window.innerHeight,
+        0.1,
+        500
+    );
+
+camera.position.set(
+    0,
+    8,
+    13
+);
+
+// RENDERER
+
+const renderer =
+    new THREE.WebGLRenderer({
+        antialias: true
+    });
+
+renderer.setSize(
+    window.innerWidth,
+    window.innerHeight
+);
+
+renderer.setPixelRatio(
+    Math.min(
+        window.devicePixelRatio,
+        2
+    )
+);
+
+renderer.shadowMap.enabled = true;
+
+renderer.shadowMap.type =
+    THREE.PCFSoftShadowMap;
+
+document.body.appendChild(
+    renderer.domElement
+);
+
+// ============================================================
+// LIGHTING
+// ============================================================
+
+const skyLight =
+    new THREE.HemisphereLight(
+        0xffffff,
+        0x355c35,
+        1.7
+    );
+
+scene.add(skyLight);
+
+const sun =
+    new THREE.DirectionalLight(
+        0xffffff,
+        2
+    );
+
+sun.position.set(
+    20,
+    30,
+    15
+);
+
+sun.castShadow = true;
+
+sun.shadow.mapSize.width =
+    2048;
+
+sun.shadow.mapSize.height =
+    2048;
+
+scene.add(sun);
+
+// ============================================================
+// STADIUM
+// ============================================================
+
+const FIELD_WIDTH = 34;
+const FIELD_LENGTH = 54;
+
+// FIELD
+
+const field =
+    new THREE.Mesh(
+        new THREE.BoxGeometry(
+            FIELD_WIDTH,
+            0.2,
+            FIELD_LENGTH
+        ),
+
+        new THREE.MeshStandardMaterial({
+            color: 0x168a42
+        })
+    );
+
+field.position.y =
+    -0.1;
+
+field.receiveShadow = true;
+
+scene.add(field);
+
+// ============================================================
+// FIELD LINES
+// ============================================================
+
+function createLine(
+    x1,
+    z1,
+    x2,
+    z2
+) {
+
+    const points = [
+        new THREE.Vector3(
+            x1,
+            0.03,
+            z1
+        ),
+
+        new THREE.Vector3(
+            x2,
+            0.03,
+            z2
+        )
+    ];
+
+    const geometry =
+        new THREE.BufferGeometry()
+            .setFromPoints(
+                points
+            );
+
+    const material =
+        new THREE.LineBasicMaterial({
+            color: 0xffffff
+        });
+
+    const line =
+        new THREE.Line(
+            geometry,
+            material
+        );
+
+    scene.add(line);
+}
+
+// OUTSIDE LINES
+
+createLine(
+    -FIELD_WIDTH / 2,
+    -FIELD_LENGTH / 2,
+    FIELD_WIDTH / 2,
+    -FIELD_LENGTH / 2
+);
+
+createLine(
+    -FIELD_WIDTH / 2,
+    FIELD_LENGTH / 2,
+    FIELD_WIDTH / 2,
+    FIELD_LENGTH / 2
+);
+
+createLine(
+    -FIELD_WIDTH / 2,
+    -FIELD_LENGTH / 2,
+    -FIELD_WIDTH / 2,
+    FIELD_LENGTH / 2
+);
+
+createLine(
+    FIELD_WIDTH / 2,
+    -FIELD_LENGTH / 2,
+    FIELD_WIDTH / 2,
+    FIELD_LENGTH / 2
+);
+
+// HALF WAY LINE
+
+createLine(
+    -FIELD_WIDTH / 2,
+    0,
+    FIELD_WIDTH / 2,
+    0
+);
+
+// CENTER CIRCLE
+
+const centerCircle =
+    new THREE.Mesh(
+        new THREE.RingGeometry(
+            4.5,
+            4.58,
+            64
+        ),
+
+        new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            side: THREE.DoubleSide
+        })
+    );
+
+centerCircle.rotation.x =
+    -Math.PI / 2;
+
+centerCircle.position.y =
+    0.04;
+
+scene.add(centerCircle);
+
+// ============================================================
+// STADIUM STANDS
+// ============================================================
+
+function createStadium() {
+
+    const standMaterial =
+        new THREE.MeshStandardMaterial({
+            color: 0x252b33
+        });
+
+    const seatMaterial =
+        new THREE.MeshStandardMaterial({
+            color: 0x59636f
+        });
+
+    for (
+        const side of [-1, 1]
+    ) {
+
+        const stand =
+            new THREE.Mesh(
+                new THREE.BoxGeometry(
+                    7,
+                    5,
+                    FIELD_LENGTH + 12
+                ),
+                standMaterial
+            );
+
+        stand.position.set(
+            side *
+            (FIELD_WIDTH / 2 + 4),
+
+            2.5,
+
+            0
+        );
+
+        scene.add(stand);
+
+        for (
+            let row = 0;
+            row < 4;
+            row++
+        ) {
+
+            const seats =
+                new THREE.Mesh(
+                    new THREE.BoxGeometry(
+                        6.5,
+                        0.25,
+                        FIELD_LENGTH + 9
+                    ),
+                    seatMaterial
+                );
+
+            seats.position.set(
+                side *
+                (FIELD_WIDTH / 2 + 3.5),
+
+                1 + row,
+
+                0
+            );
+
+            scene.add(seats);
+        }
+    }
+}
+
+createStadium();
+
+// ============================================================
+// GOALS
+// ============================================================
+
+function createGoal(z) {
+
+    const goal =
+        new THREE.Group();
+
+    const material =
+        new THREE.MeshStandardMaterial({
+            color: 0xffffff
+        });
+
+    const post1 =
+        new THREE.Mesh(
+            new THREE.CylinderGeometry(
+                0.14,
+                0.14,
+                3.2,
+                16
+            ),
+            material
+        );
+
+    const post2 =
+        post1.clone();
+
+    const crossbar =
+        new THREE.Mesh(
+            new THREE.CylinderGeometry(
+                0.14,
+                0.14,
+                7.2,
+                16
+            ),
+            material
+        );
+
+    post1.position.set(
+        -3.6,
+        1.6,
+        0
+    );
+
+    post2.position.set(
+        3.6,
+        1.6,
+        0
+    );
+
+    crossbar.rotation.z =
+        Math.PI / 2;
+
+    crossbar.position.set(
+        0,
+        3.2,
+        0
+    );
+
+    goal.add(
+        post1,
+        post2,
+        crossbar
+    );
+
+    goal.position.z =
+        z;
+
+    scene.add(goal);
+}
+
+createGoal(
+    -FIELD_LENGTH / 2
+);
+
+createGoal(
+    FIELD_LENGTH / 2
+);
+
+// ============================================================
+// SOFTOY CREATOR
+// ============================================================
+
+function createSoftoy(
+    playerData,
+    team
+) {
+
+    const character =
+        new THREE.Group();
+
+    character.userData.player =
+        playerData;
+
+    character.userData.team =
+        team;
+
+    character.userData.walkTime =
+        Math.random() * 10;
+
+    // --------------------------------------------------------
+    // COLORS
+    // --------------------------------------------------------
+
+    const bodyColor =
+        team === "softoy"
+            ? playerData.color
+            : 0x666666;
+
+    // --------------------------------------------------------
+    // BODY
+    // --------------------------------------------------------
+
+    const body =
+        new THREE.Mesh(
+            new THREE.SphereGeometry(
+                1,
+                32,
+                24
+            ),
+
+            new THREE.MeshStandardMaterial({
+                color: bodyColor
+            })
+        );
+
+    body.scale.set(
+        0.9,
+        1.1,
+        0.7
+    );
+
+    body.position.y =
+        1.4;
+
+    body.castShadow = true;
+
+    character.add(body);
+
+    // --------------------------------------------------------
+    // HEAD
+    // --------------------------------------------------------
+
+    const head =
+        new THREE.Mesh(
+            new THREE.SphereGeometry(
+                1,
+                32,
+                32
+            ),
+
+            new THREE.MeshStandardMaterial({
+                color: bodyColor
+            })
+        );
+
+    head.scale.set(
+        1.15,
+        1.05,
+        1.05
+    );
+
+    head.position.y =
+        2.8;
+
+    head.castShadow = true;
+
+    character.add(head);
+
+    // --------------------------------------------------------
+    // EYES
+    // --------------------------------------------------------
+
+    const eyeMaterial =
+        new THREE.MeshStandardMaterial({
+            color: 0x111111
+        });
+
+    const leftEye =
+        new THREE.Mesh(
+            new THREE.SphereGeometry(
+                0.13,
+                16,
+                16
+            ),
+            eyeMaterial
+        );
+
+    const rightEye =
+        leftEye.clone();
+
+    leftEye.position.set(
+        -0.35,
+        2.95,
+        -0.9
+    );
+
+    rightEye.position.set(
+        0.35,
+        2.95,
+        -0.9
+    );
+
+    character.add(
+        leftEye,
+        rightEye
+    );
+
+    // --------------------------------------------------------
+    // EARS
+    // --------------------------------------------------------
+
+    const earMaterial =
+        new THREE.MeshStandardMaterial({
+            color: bodyColor
+        });
+
+    const leftEar =
+        new THREE.Mesh(
+            new THREE.SphereGeometry(
+                0.3,
+                16,
+                16
+            ),
+            earMaterial
+        );
+
+    const rightEar =
+        leftEar.clone();
+
+    leftEar.position.set(
+        -0.75,
+        3.35,
+        0
+    );
+
+    rightEar.position.set(
+        0.75,
+        3.35,
+        0
+    );
+
+    character.add(
+        leftEar,
+        rightEar
+    );
+
+    // --------------------------------------------------------
+    // ARMS
+    // --------------------------------------------------------
+
+    const armGeometry =
+        new THREE.CapsuleGeometry(
+            0.22,
+            0.9,
+            8,
+            16
+        );
+
+    const armMaterial =
+        new THREE.MeshStandardMaterial({
+            color: bodyColor
+        });
+
+    const leftArm =
+        new THREE.Mesh(
+            armGeometry,
+            armMaterial
+        );
+
+    const rightArm =
+        new THREE.Mesh(
+            armGeometry,
+            armMaterial
+        );
+
+    leftArm.position.set(
+        -1,
+        1.4,
+        0
+    );
+
+    rightArm.position.set(
+        1,
+        1.4,
+        0
+    );
+
+    character.add(
+        leftArm,
+        rightArm
+    );
+
+    // --------------------------------------------------------
+    // LEGS
+    // ============================================================
+    const legGeometry =
+        new THREE.CapsuleGeometry(
+            0.28,
+            0.9,
+            8,
+            16
+        );
+
+    const legMaterial =
+        new THREE.MeshStandardMaterial({
+            color: bodyColor
+        });
+
+    const leftLeg =
+        new THREE.Mesh(
+            legGeometry,
+            legMaterial
+        );
+
+    const rightLeg =
+        new THREE.Mesh(
+            legGeometry,
+            legMaterial
+        );
+
+    leftLeg.position.set(
+        -0.4,
+        0.35,
+        0
+    );
+
+    rightLeg.position.set(
+        0.4,
+        0.35,
+        0
+    );
+
+    character.add(
+        leftLeg,
+        rightLeg
+    );
+
+    // ============================================================
+    // BOOTS
+    // ============================================================
+
+    const bootMaterial =
+        new THREE.MeshStandardMaterial({
+            color: 0x111111
+        });
+
+    const leftBoot =
+        new THREE.Mesh(
+            new THREE.SphereGeometry(
+                0.3,
+                16,
+                16
+            ),
+            bootMaterial
+        );
+
+    const rightBoot =
+        leftBoot.clone();
+
+    leftBoot.scale.set(
+        1.1,
+        0.5,
+        1.5
+    );
+
+    rightBoot.scale.copy(
+        leftBoot.scale
+    );
+
+    leftBoot.position.set(
+        -0.4,
+        0.05,
+        -0.15
+    );
+
+    rightBoot.position.set(
+        0.4,
+        0.05,
+        -0.15
+    );
+
+    character.add(
+        leftBoot,
+        rightBoot
+    );
+
+    // ============================================================
+    // JERSEY
+    // ============================================================
+
+    const jerseyColor =
+        team === "softoy"
+            ? 0x155bb5
+            : 0x9e2020;
+
+    const jersey =
+        new THREE.Mesh(
+            new THREE.SphereGeometry(
+                1.02,
+                24,
+                20
+            ),
+
+            new THREE.MeshStandardMaterial({
+                color: jerseyColor
+            })
+        );
+
+    jersey.scale.set(
+        0.88,
+        0.8,
+        0.75
+    );
+
+    jersey.position.y =
+        1.45;
+
+    character.add(jersey);
+
+    // NUMBER
+    const number =
+        createNumberSprite(
+            playerData.number
+        );
+
+    number.position.set(
+        0,
+        1.5,
+        -0.78
+    );
+
+    character.add(number);
+
+    character.userData.parts = {
+        leftArm,
+        rightArm,
+        leftLeg,
+        rightLeg,
+        body,
+        head
+    };
+
+    return character;
+}
+
+// ============================================================
+// NUMBER SPRITE
+// ============================================================
+function createNumberSprite(number) {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 256;
+    const context = canvas.getContext("2d");
+    context.font = "bold 150px Arial";
+    context.fillStyle = "white";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(String(number), 128, 128);
+    const texture = new THREE.CanvasTexture(canvas);
+    const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(0.9, 0.9, 0.9);
+    return sprite;
+}
+
+// ============================================================
+// PLAYERS
+// ============================================================
+
+let player = null;
+const teammates = [];
+const opponents = [];
+
+// ============================================================
+// SETUP PLAYERS
+// ============================================================
+
+function setupPlayers() {
+    player = createSoftoy(Game.selectedPlayer || Game.players[0], "softoy");
+    player.position.set(0, 0, 12);
+    scene.add(player);
+
+    for (let i = 0; i < 3; i++) {
+        const data = Game.players[(i + 1) % Game.players.length];
+        const teammate = createSoftoy(data, "softoy");
+        teammate.position.set(-8 + i * 8, 0, 7 - i * 5);
+        scene.add(teammate);
+        teammates.push(teammate);
+    }
+
+    for (let i = 0; i < 4; i++) {
+        const opponent = createSoftoy(Game.players[i % Game.players.length], "opponent");
+        opponent.position.set(i % 2 ? 8 : -8, 0, -8 - Math.floor(i / 2) * 8);
+        scene.add(opponent);
+        opponents.push(opponent);
+    }
+}
+
+// ============================================================
+// BALL
+// ============================================================
+const ball = new THREE.Mesh(new THREE.SphereGeometry(0.43, 32, 32), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+ball.castShadow = true;
+ball.position.set(0, 0.43, 8);
+scene.add(ball);
+ball.userData.velocity = new THREE.Vector3();
+ball.userData.owner = null;
+
+// ============================================================
+// KEYBOARD
+// ============================================================
+const keys = {};
+window.addEventListener("keydown", event => {
+    keys[event.key.toLowerCase()] = true;
+    if (event.code === "Space") {
+        shoot();
+    }
+});
+window.addEventListener("keyup", event => {
+    keys[event.key.toLowerCase()] = false;
+});
+
+// ============================================================
+// MOBILE TOUCH
+// ============================================================
+const touch = { x: 0, y: 0, sprint: false };
+
+// ============================================================
+// TOUCH BUTTON
+// ============================================================
+function createTouchButton(text, className, callback) {
+    const button = document.createElement("button");
+    button.innerText = text;
+    button.className = "touch-button " + className;
+    button.addEventListener("touchstart", event => {
+        event.preventDefault();
+        callback(true);
+    });
+    button.addEventListener("touchend", event => {
+        event.preventDefault();
+        callback(false);
+    });
+    document.body.appendChild(button);
+}
+
+createTouchButton("⚡", "sprint", active => { touch.sprint = active; });
+createTouchButton("⚽", "shoot", active => { if (active) { shoot(); } });
+
+// ============================================================
+// MOBILE JOYSTICK
+// ============================================================
+const joystick = document.createElement("div");
+joystick.id = "joystick";
+joystick.style.position = "fixed";
+joystick.style.left = "25px";
+joystick.style.bottom = "25px";
+joystick.style.width = "130px";
+joystick.style.height = "130px";
+joystick.style.border = "3px solid white";
+joystick.style.borderRadius = "50%";
+joystick.style.zIndex = "20";
+joystick.style.touchAction = "none";
+document.body.appendChild(joystick);
+joystick.addEventListener("touchmove", event => {
+    const rect = joystick.getBoundingClientRect();
+    const finger = event.touches[0];
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    touch.x = (finger.clientX - centerX) / (rect.width / 2);
+    touch.y = (finger.clientY - centerY) / (rect.height / 2);
+    touch.x = THREE.MathUtils.clamp(touch.x, -1, 1);
+    touch.y = THREE.MathUtils.clamp(touch.y, -1, 1);
+});
+joystick.addEventListener("touchend", () => { touch.x = 0; touch.y = 0; });
+
+// ============================================================
+// PLAYER MOVEMENT
+// ============================================================
+function updatePlayer(delta) {
+    if (!player) return;
+    const direction = new THREE.Vector3();
+    if (keys["w"]) direction.z -= 1;
+    if (keys["s"]) direction.z += 1;
+    if (keys["a"]) direction.x -= 1;
+    if (keys["d"]) direction.x += 1;
+    direction.x += touch.x;
+    direction.z += touch.y;
+    if (direction.length() > 0) {
+        direction.normalize();
+        const sprinting = keys["shift"] || touch.sprint;
+        const speed = player.userData.player.speed * 0.6 * (sprinting ? 1.6 : 1);
+        player.position.x += direction.x * speed * delta;
+        player.position.z += direction.z * speed * delta;
+        player.rotation.y = Math.atan2(direction.x, direction.z);
+        animateRunning(player, delta, sprinting);
+    } else {
+        animateIdle(player, delta);
+    }
+    player.position.x = THREE.MathUtils.clamp(player.position.x, -FIELD_WIDTH / 2 + 1, FIELD_WIDTH / 2 - 1);
+    player.position.z = THREE.MathUtils.clamp(player.position.z, -FIELD_LENGTH / 2 + 1, FIELD_LENGTH / 2 - 1);
+}
+
+// ============================================================
+// RUNNING ANIMATION
+// ============================================================
+function animateRunning(character, delta, sprinting) {
+    const parts = character.userData.parts;
+    character.userData.walkTime += delta * (sprinting ? 16 : 10);
+    const swing = Math.sin(character.userData.walkTime);
+    parts.leftLeg.rotation.x = swing * 0.8;
+    parts.rightLeg.rotation.x = -swing * 0.8;
+    parts.leftArm.rotation.x = -swing * 0.5;
+    parts.rightArm.rotation.x = swing * 0.5;
+    character.position.y = Math.abs(swing) * 0.08;
+}
+
+// ============================================================
+// IDLE ANIMATION
+// ============================================================
+function animateIdle(character, delta) {
+    character.userData.walkTime += delta * 2;
+    character.position.y = Math.sin(character.userData.walkTime) * 0.03;
+}
+
+// ============================================================
+// BALL
+// ============================================================
+function updateBall(delta) {
+    if (ball.userData.owner === player) {
+        const forward = new THREE.Vector3(0, 0, -1);
+        forward.applyQuaternion(player.quaternion);
+        const target = player.position.clone().add(forward.multiplyScalar(1.3));
+        target.y = 0.43;
+        ball.position.lerp(target, 0.2);
+        ball.userData.velocity.set(0, 0, 0);
+    } else {
+        ball.userData.velocity.y -= 9.8 * delta;
+        ball.position.add(ball.userData.velocity.clone().multiplyScalar(delta));
+        if (ball.position.y < 0.43) {
+            ball.position.y = 0.43;
+            ball.userData.velocity.y *= -0.35;
+        }
+        ball.userData.velocity.multiplyScalar(0.985);
+    }
+    if (ball.userData.owner === null) {
+        if (ball.position.distanceTo(player.position) < 1.6) {
+            if (ball.userData.velocity.length() < 3) {
+                ball.userData.owner = player;
+            }
+        }
+    }
+}
+
+// ============================================================
+// SHOOT
+// ============================================================
+function shoot() {
+    if (!player) return;
+    if (ball.userData.owner !== player) return;
+    ball.userData.owner = null;
+    const direction = new THREE.Vector3(0, 0, -1);
+    direction.applyQuaternion(player.quaternion);
+    direction.normalize();
+    const power = 20 + Game.selectedPlayer.shooting;
+    ball.userData.velocity.copy(direction.multiplyScalar(power));
+    ball.userData.velocity.y = 4;
+    kickAnimation();
+}
+
+// ============================================================
+// KICK ANIMATION
+// ============================================================
+function kickAnimation() {
+    const leg = player.userData.parts.rightLeg;
+    leg.rotation.x = -1.4;
+    setTimeout(() => { leg.rotation.x = 0; }, 200);
+}
+
+// ============================================================
+// OPPONENT AI
+// ============================================================
+function updateOpponents(delta) {
+    opponents.forEach(opponent => {
+        const direction = ball.position.clone().sub(opponent.position);
+        direction.y = 0;
+        if (direction.length() > 1.5) {
+            direction.normalize();
+            opponent.position.add(direction.multiplyScalar(3 * delta));
+            opponent.rotation.y = Math.atan2(direction.x, direction.z);
+            animateRunning(opponent, delta, false);
+        }
+    });
+}
+
+// ============================================================
+// GOALS
+// ============================================================
+function checkGoal() {
+    if (ball.position.z < -FIELD_LENGTH / 2) {
+        Game.score.softoy++;
+        Game.xp += 25;
+        resetBall();
+        updateScoreUI();
+        showMessage("⚽ GOAL!");
+    }
+    if (ball.position.z > FIELD_LENGTH / 2) {
+        Game.score.opponent++;
+        resetBall();
+        updateScoreUI();
+        showMessage("THE OPPONENT SCORED!");
+    }
+}
+
+// ============================================================
+// RESET BALL
+// ============================================================
+function resetBall() {
+    ball.position.set(0, 0.43, 0);
+    ball.userData.velocity.set(0, 0, 0);
+    ball.userData.owner = null;
+}
+
+// ============================================================
+// CAMERA
+// ============================================================
+function updateCamera(delta) {
+    if (!player) return;
+    const target = player.position.clone();
+    target.y += 7;
+    target.z += 10;
+    camera.position.lerp(target, 4 * delta);
+    camera.lookAt(player.position.x, player.position.y + 1, player.position.z);
+}
+
+// ============================================================
+// UI
+// ============================================================
+function createUI() {
+    const ui = document.createElement("div");
+    ui.id = "gameUI";
+    ui.style.position = "fixed";
+    ui.style.top = "20px";
+    ui.style.left = "50%";
+    ui.style.transform = "translateX(-50%)";
+    ui.style.color = "white";
+    ui.style.fontFamily = "Arial";
+    ui.style.fontWeight = "bold";
+    ui.style.textAlign = "center";
+    ui.style.zIndex = "10";
+    ui.innerHTML = `
+        <div id="score"> SOFTOY 0 - 0 OPPONENT </div>
+        <div id="timer"> 03:00 </div>
+        <div id="rank"> RANK: Rookie </div>
+    `;
+    document.body.appendChild(ui);
+    updateScoreUI();
+    updateTimerUI();
+    updateRank();
+}
+
+// ============================================================
+// SCORE/TIMER/RANK
+// ============================================================
+function updateScoreUI() {
+    const score = document.getElementById("score");
+    if (!score) return;
+    score.innerText = `SOFTOY ${Game.score.softoy} - ${Game.score.opponent} OPPONENT`;
+}
+function updateTimerUI() {
+    const timer = document.getElementById("timer");
+    if (!timer) return;
+    const minutes = Math.floor(Game.matchTime / 60);
+    const seconds = Game.matchTime % 60;
+    timer.innerText = `${String(minutes).padStart(2,"0")}:${String(seconds).padStart(2,"0")}`;
+}
+function updateRank() {
+    const rank = document.getElementById("rank");
+    if (!rank) return;
+    const rankName = ranks[Math.min(Game.rank - 1, ranks.length - 1)];
+    rank.innerText = "RANK: " + rankName;
+}
+
+// ============================================================
+// MAIN MENU / PLAYER SELECTION / START MATCH
+// ============================================================
+function showMainMenu() {
+    Game.screen = "menu";
+    Game.running = false;
+    const menu = document.createElement("div");
+    menu.id = "mainMenu";
+    menu.style.position = "fixed";
+    menu.style.inset = "0";
+    menu.style.background = "rgba(0,0,0,0.85)";
+    menu.style.color = "white";
+    menu.style.display = "flex";
+    menu.style.flexDirection = "column";
+    menu.style.alignItems = "center";
+    menu.style.justifyContent = "center";
+    menu.style.zIndex = "100";
+    menu.innerHTML = `
+        <h1> 🧸 SOFTOY FOOTBALL ⚽ </h1>
+        <button id="playButton"> PLAY MATCH </button>
+        <button id="playersButton"> PLAYERS </button>
+    `;
+    document.body.appendChild(menu);
+    document.getElementById("playButton").onclick = () => { menu.remove(); showPlayerSelection(); };
+    document.getElementById("playersButton").onclick = () => { menu.remove(); showPlayerSelection(); };
+}
+
+function showPlayerSelection() {
+    const screen = document.createElement("div");
+    screen.id = "playerSelection";
+    screen.style.position = "fixed";
+    screen.style.inset = "0";
+    screen.style.background = "rgba(0,0,0,0.9)";
+    screen.style.color = "white";
+    screen.style.display = "flex";
+    screen.style.flexDirection = "column";
+    screen.style.alignItems = "center";
+    screen.style.padding = "30px";
+    screen.style.zIndex = "100";
+    screen.innerHTML = `<h1> CHOOSE YOUR SOFTOY </h1>`;
+    Game.players.forEach(playerData => {
+        const button = document.createElement("button");
+        button.innerText = `${playerData.name} #${playerData.number}`;
+        button.style.margin = "8px";
+        button.style.padding = "15px 30px";
+        button.style.fontSize = "20px";
+        button.onclick = () => { Game.selectedPlayer = playerData; screen.remove(); startMatch(); };
+        screen.appendChild(button);
+    });
+    document.body.appendChild(screen);
+}
+
+function startMatch() {
+    Game.screen = "match";
+    Game.running = true;
+    Game.matchTime = 180;
+    Game.score.softoy = 0;
+    Game.score.opponent = 0;
+    setupPlayers();
+    createUI();
+    resetBall();
+}
+
+// ============================================================
+// MESSAGE / TIMER / END MATCH
+// ============================================================
+function showMessage(message) {
+    const messageBox = document.createElement("div");
+    messageBox.innerText = message;
+    messageBox.style.position = "fixed";
+    messageBox.style.top = "35%";
+    messageBox.style.left = "50%";
+    messageBox.style.transform = "translate(-50%,-50%)";
+    messageBox.style.color = "white";
+    messageBox.style.fontSize = "45px";
+    messageBox.style.fontWeight = "bold";
+    messageBox.style.zIndex = "200";
+    document.body.appendChild(messageBox);
+    setTimeout(() => { messageBox.remove(); }, 1200);
+}
+
+let timerCounter = 0;
+function updateMatchTimer(delta) {
+    timerCounter += delta;
+    if (timerCounter >= 1) {
+        timerCounter = 0;
+        Game.matchTime--;
+        updateTimerUI();
+        if (Game.matchTime <= 0) {
+            Game.running = false;
+            endMatch();
+        }
+    }
+}
+
+function endMatch() {
+    const won = Game.score.softoy > Game.score.opponent;
+    if (won) {
+        Game.rank++;
+        Game.xp += 100;
+        showMessage("🏆 YOU WIN!");
+    } else {
+        showMessage("FULL TIME");
+    }
+    setTimeout(() => {
+        alert(`FULL TIME\\n\\nSOFTOY ${Game.score.softoy} - ${Game.score.opponent} OPPONENT\\n\\nRANK: ${
+            ranks[Math.min(Game.rank - 1, ranks.length - 1)]
+        }`);
+    }, 500);
+}
+
+// ============================================================
+// RESIZE
+// ============================================================
+window.addEventListener("resize", () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+const clock = new THREE.Clock();
+function gameLoop() {
+    requestAnimationFrame(gameLoop);
+    const delta = Math.min(clock.getDelta(), 0.05);
+    if (Game.running) {
+        updatePlayer(delta);
+        updateBall(delta);
+        updateOpponents(delta);
+        checkGoal();
+        updateMatchTimer(delta);
+    }
+    updateCamera(delta);
+    renderer.render(scene, camera);
+}
+
+// ============================================================
+// START
+// ============================================================
+showMainMenu();
+gameLoop();
+console.log("SOFTOY FOOTBALL 3D READY!");
+  </script>
+</body>
+</html>
