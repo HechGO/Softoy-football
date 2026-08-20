@@ -1,0 +1,3869 @@
+"use strict";
+
+/* =========================================================
+   SOFTOY FOOTBALL 3D
+   COMPLETE game.js
+   ========================================================= */
+
+/* =========================================================
+   GAME DATA
+   ========================================================= */
+
+const SOFTOYS = [
+    {
+        id: "tb",
+        name: "T-B",
+        number: 10,
+        type: "bear",
+        body: 0x8b5a36,
+        shirt: 0xf2f2f2,
+        speed: 7,
+        shooting: 9,
+        passing: 8,
+        defending: 7
+    },
+
+    {
+        id: "ybear",
+        name: "Ybear",
+        number: 11,
+        type: "bear",
+        body: 0xf1eee6,
+        shirt: 0xf2f2f2,
+        speed: 8,
+        shooting: 8,
+        passing: 8,
+        defending: 6
+    },
+
+    {
+        id: "hog",
+        name: "Hog",
+        number: 4,
+        type: "hedgehog",
+        body: 0x8a5a3b,
+        shirt: 0xf2f2f2,
+        speed: 9,
+        shooting: 8,
+        passing: 7,
+        defending: 6
+    },
+
+    {
+        id: "roary",
+        name: "Roary",
+        number: 3,
+        type: "tiger",
+        body: 0xe18a28,
+        shirt: 0xf2f2f2,
+        speed: 8,
+        shooting: 7,
+        passing: 7,
+        defending: 9
+    }
+];
+
+
+/* =========================================================
+   RANKS
+   ========================================================= */
+
+const RANKS = [
+    "ROOKIE",
+    "BRONZE",
+    "SILVER",
+    "GOLD",
+    "PLATINUM",
+    "DIAMOND",
+    "CHAMPION",
+    "LEGEND"
+];
+
+
+/* =========================================================
+   GAME STATE
+   ========================================================= */
+
+const Game = {
+
+    screen: "menu",
+
+    selectedPlayer: SOFTOYS[0],
+
+    score: {
+        softoy: 0,
+        opponent: 0
+    },
+
+    matchTime: 180,
+
+    rank: 1,
+
+    running: false,
+
+    paused: false,
+
+    lastGoalTime: 0,
+
+    player: null,
+
+    teammates: [],
+
+    opponents: [],
+
+    allPlayers: []
+};
+
+
+/* =========================================================
+   THREE.JS
+   ========================================================= */
+
+let scene;
+let camera;
+let renderer;
+let clock;
+
+
+/* =========================================================
+   FIELD
+   ========================================================= */
+
+const FIELD_WIDTH = 30;
+const FIELD_LENGTH = 48;
+
+
+/* =========================================================
+   BALL
+   ========================================================= */
+
+let ball;
+
+
+/* =========================================================
+   INPUT
+   ========================================================= */
+
+const keys = {};
+
+const mobileInput = {
+    x: 0,
+    y: 0,
+    sprint: false
+};
+
+
+/* =========================================================
+   INITIALIZATION
+   ========================================================= */
+
+init();
+
+
+function init() {
+
+    createScene();
+
+    createLighting();
+
+    createField();
+
+    createGoals();
+
+    createBall();
+
+    createControls();
+
+    createMobileControls();
+
+    createMenu();
+
+    clock = new THREE.Clock();
+
+    window.addEventListener(
+        "resize",
+        resize
+    );
+
+    window.addEventListener(
+        "keydown",
+        keyDown
+    );
+
+    window.addEventListener(
+        "keyup",
+        keyUp
+    );
+
+    gameLoop();
+}
+
+
+/* =========================================================
+   SCENE
+   ========================================================= */
+
+function createScene() {
+
+    scene = new THREE.Scene();
+
+    scene.background =
+        new THREE.Color(0x79b8ff);
+
+    scene.fog =
+        new THREE.Fog(
+            0x79b8ff,
+            45,
+            100
+        );
+
+
+    camera =
+        new THREE.PerspectiveCamera(
+            58,
+            window.innerWidth /
+            window.innerHeight,
+            0.1,
+            300
+        );
+
+
+    camera.position.set(
+        0,
+        8,
+        14
+    );
+
+
+    renderer =
+        new THREE.WebGLRenderer({
+            antialias: true
+        });
+
+
+    renderer.setSize(
+        window.innerWidth,
+        window.innerHeight
+    );
+
+
+    renderer.setPixelRatio(
+        Math.min(
+            window.devicePixelRatio,
+            2
+        )
+    );
+
+
+    renderer.shadowMap.enabled = true;
+
+    renderer.shadowMap.type =
+        THREE.PCFSoftShadowMap;
+
+
+    renderer.outputColorSpace =
+        THREE.SRGBColorSpace;
+
+
+    document.body.appendChild(
+        renderer.domElement
+    );
+}
+
+
+/* =========================================================
+   LIGHTING
+   ========================================================= */
+
+function createLighting() {
+
+    const hemisphere =
+        new THREE.HemisphereLight(
+            0xffffff,
+            0x31552d,
+            2
+        );
+
+    scene.add(
+        hemisphere
+    );
+
+
+    const sun =
+        new THREE.DirectionalLight(
+            0xffffff,
+            2.2
+        );
+
+    sun.position.set(
+        10,
+        25,
+        8
+    );
+
+
+    sun.castShadow = true;
+
+    sun.shadow.mapSize.width = 2048;
+    sun.shadow.mapSize.height = 2048;
+
+    scene.add(
+        sun
+    );
+}
+
+
+/* =========================================================
+   FIELD
+   ========================================================= */
+
+function createField() {
+
+    const grass =
+        new THREE.Mesh(
+            new THREE.BoxGeometry(
+                FIELD_WIDTH,
+                0.25,
+                FIELD_LENGTH
+            ),
+
+            new THREE.MeshStandardMaterial({
+                color: 0x238b42,
+                roughness: 1
+            })
+        );
+
+
+    grass.position.y = -0.13;
+
+    grass.receiveShadow = true;
+
+    scene.add(
+        grass
+    );
+
+
+    // Grass strips
+
+    for (
+        let i = 0;
+        i < 12;
+        i++
+    ) {
+
+        const strip =
+            new THREE.Mesh(
+                new THREE.BoxGeometry(
+                    FIELD_WIDTH,
+                    0.012,
+                    4
+                ),
+
+                new THREE.MeshBasicMaterial({
+                    color:
+                        i % 2
+                            ? 0x2d9848
+                            : 0x258c40
+                })
+            );
+
+
+        strip.position.set(
+            0,
+            0.01,
+            -22 + i * 4
+        );
+
+
+        scene.add(
+            strip
+        );
+    }
+
+
+    // Boundary
+
+    createFieldLine(
+        -15,
+        -24,
+        15,
+        -24
+    );
+
+    createFieldLine(
+        -15,
+        24,
+        15,
+        24
+    );
+
+    createFieldLine(
+        -15,
+        0,
+        15,
+        0
+    );
+
+    createFieldLine(
+        -15,
+        -24,
+        -15,
+        24
+    );
+
+    createFieldLine(
+        15,
+        -24,
+        15,
+        24
+    );
+
+
+    // Centre circle
+
+    createCircle(
+        0,
+        0,
+        4
+    );
+
+
+    // Penalty areas
+
+    createCircle(
+        0,
+        -24,
+        6
+    );
+
+    createCircle(
+        0,
+        24,
+        6
+    );
+
+
+    createStands();
+}
+
+
+/* =========================================================
+   FIELD LINES
+   ========================================================= */
+
+function createFieldLine(
+    x1,
+    z1,
+    x2,
+    z2
+) {
+
+    const geometry =
+        new THREE.BufferGeometry()
+            .setFromPoints([
+                new THREE.Vector3(
+                    x1,
+                    0.025,
+                    z1
+                ),
+
+                new THREE.Vector3(
+                    x2,
+                    0.025,
+                    z2
+                )
+            ]);
+
+
+    const material =
+        new THREE.LineBasicMaterial({
+            color: 0xffffff
+        });
+
+
+    const line =
+        new THREE.Line(
+            geometry,
+            material
+        );
+
+
+    scene.add(
+        line
+    );
+}
+
+
+/* =========================================================
+   CIRCLES
+   ========================================================= */
+
+function createCircle(
+    x,
+    z,
+    radius
+) {
+
+    const geometry =
+        new THREE.RingGeometry(
+            radius - 0.035,
+            radius + 0.035,
+            80
+        );
+
+
+    const material =
+        new THREE.MeshBasicMaterial({
+            color: 0xffffff,
+            side: THREE.DoubleSide
+        });
+
+
+    const circle =
+        new THREE.Mesh(
+            geometry,
+            material
+        );
+
+
+    circle.rotation.x =
+        -Math.PI / 2;
+
+
+    circle.position.set(
+        x,
+        0.03,
+        z
+    );
+
+
+    scene.add(
+        circle
+    );
+}
+
+
+/* =========================================================
+   STADIUM STANDS
+   ========================================================= */
+
+function createStands() {
+
+    for (
+        const z of [-30, 30]
+    ) {
+
+        const stand =
+            new THREE.Mesh(
+                new THREE.BoxGeometry(
+                    38,
+                    4,
+                    5
+                ),
+
+                new THREE.MeshStandardMaterial({
+                    color: 0x454b55
+                })
+            );
+
+
+        stand.position.set(
+            0,
+            2,
+            z
+        );
+
+
+        scene.add(
+            stand
+        );
+
+
+        for (
+            let x = -16;
+            x <= 16;
+            x += 2
+        ) {
+
+            const seat =
+                new THREE.Mesh(
+                    new THREE.BoxGeometry(
+                        1.2,
+                        0.5,
+                        1
+                    ),
+
+                    new THREE.MeshStandardMaterial({
+                        color: 0xd6d6d6
+                    })
+                );
+
+
+            seat.position.set(
+                x,
+                4,
+                z
+            );
+
+
+            scene.add(
+                seat
+            );
+        }
+    }
+}
+
+
+/* =========================================================
+   GOALS
+   ========================================================= */
+
+function createGoals() {
+
+    createGoal(
+        -24.5
+    );
+
+    createGoal(
+        24.5
+    );
+}
+
+
+function createGoal(z) {
+
+    const goal =
+        new THREE.Group();
+
+
+    const material =
+        new THREE.MeshStandardMaterial({
+            color: 0xffffff
+        });
+
+
+    const post1 =
+        new THREE.Mesh(
+            new THREE.CylinderGeometry(
+                0.12,
+                0.12,
+                3.2,
+                12
+            ),
+            material
+        );
+
+
+    const post2 =
+        post1.clone();
+
+
+    const crossbar =
+        new THREE.Mesh(
+            new THREE.CylinderGeometry(
+                0.12,
+                0.12,
+                7,
+                12
+            ),
+            material
+        );
+
+
+    post1.position.set(
+        -3.5,
+        1.6,
+        0
+    );
+
+
+    post2.position.set(
+        3.5,
+        1.6,
+        0
+    );
+
+
+    crossbar.rotation.z =
+        Math.PI / 2;
+
+
+    crossbar.position.set(
+        0,
+        3.2,
+        0
+    );
+
+
+    goal.add(
+        post1,
+        post2,
+        crossbar
+    );
+
+
+    goal.position.z =
+        z;
+
+
+    scene.add(
+        goal
+    );
+}
+
+
+/* =========================================================
+   SOFTOY CHARACTER
+   ========================================================= */
+
+function createSoftoy(
+    data,
+    team
+) {
+
+    const character =
+        new THREE.Group();
+
+
+    character.userData = {
+
+        data: data,
+
+        team: team,
+
+        walkTime:
+            Math.random() * 10,
+
+        parts: {},
+
+        celebrating: false
+    };
+
+
+    const plushMaterial =
+        new THREE.MeshStandardMaterial({
+            color: data.body,
+            roughness: 0.9
+        });
+
+
+    const shirtMaterial =
+        new THREE.MeshStandardMaterial({
+            color: data.shirt,
+            roughness: 0.8
+        });
+
+
+    const darkMaterial =
+        new THREE.MeshStandardMaterial({
+            color: 0x171717
+        });
+
+
+    /*
+       BODY
+    */
+
+    const body =
+        new THREE.Mesh(
+            new THREE.SphereGeometry(
+                1,
+                28,
+                20
+            ),
+            shirtMaterial
+        );
+
+
+    body.scale.set(
+        0.82,
+        1,
+        0.65
+    );
+
+
+    body.position.y =
+        1.45;
+
+
+    body.castShadow = true;
+
+
+    character.add(
+        body
+    );
+
+
+    /*
+       HEAD
+    */
+
+    const head =
+        new THREE.Mesh(
+            new THREE.SphereGeometry(
+                1,
+                32,
+                24
+            ),
+            plushMaterial
+        );
+
+
+    head.scale.set(
+        1.08,
+        1,
+        1.02
+    );
+
+
+    head.position.y =
+        2.85;
+
+
+    head.castShadow = true;
+
+
+    character.add(
+        head
+    );
+
+
+    /*
+       EARS
+    */
+
+    const earGeometry =
+        new THREE.SphereGeometry(
+            0.28,
+            18,
+            14
+        );
+
+
+    const leftEar =
+        new THREE.Mesh(
+            earGeometry,
+            plushMaterial
+        );
+
+
+    const rightEar =
+        leftEar.clone();
+
+
+    leftEar.position.set(
+        -0.72,
+        3.35,
+        0
+    );
+
+
+    rightEar.position.set(
+        0.72,
+        3.35,
+        0
+    );
+
+
+    character.add(
+        leftEar,
+        rightEar
+    );
+
+
+    /*
+       EYES
+    */
+
+    const eyeGeometry =
+        new THREE.SphereGeometry(
+            0.115,
+            16,
+            12
+        );
+
+
+    const leftEye =
+        new THREE.Mesh(
+            eyeGeometry,
+            darkMaterial
+        );
+
+
+    const rightEye =
+        leftEye.clone();
+
+
+    leftEye.position.set(
+        -0.36,
+        3.02,
+        -0.94
+    );
+
+
+    rightEye.position.set(
+        0.36,
+        3.02,
+        -0.94
+    );
+
+
+    character.add(
+        leftEye,
+        rightEye
+    );
+
+
+    /*
+       NOSE
+    */
+
+    const nose =
+        new THREE.Mesh(
+            new THREE.SphereGeometry(
+                0.13,
+                14,
+                12
+            ),
+            darkMaterial
+        );
+
+
+    nose.position.set(
+        0,
+        2.82,
+        -1
+    );
+
+
+    character.add(
+        nose
+    );
+
+
+    /*
+       SMILE
+    */
+
+    const smile =
+        new THREE.Mesh(
+            new THREE.TorusGeometry(
+                0.25,
+                0.025,
+                8,
+                20,
+                Math.PI
+            ),
+            darkMaterial
+        );
+
+
+    smile.rotation.z =
+        Math.PI;
+
+
+    smile.position.set(
+        0,
+        2.67,
+        -0.99
+    );
+
+
+    character.add(
+        smile
+    );
+
+
+    /*
+       NUMBER
+    */
+
+    const number =
+        createNumberSprite(
+            String(data.number)
+        );
+
+
+    number.position.set(
+        0,
+        1.55,
+        -0.67
+    );
+
+
+    number.scale.set(
+        0.75,
+        0.75,
+        0.75
+    );
+
+
+    character.add(
+        number
+    );
+
+
+    /*
+       ARMS
+    */
+
+    const armGeometry =
+        new THREE.CapsuleGeometry(
+            0.2,
+            0.8,
+            8,
+            12
+        );
+
+
+    const leftArm =
+        new THREE.Mesh(
+            armGeometry,
+            shirtMaterial
+        );
+
+
+    const rightArm =
+        leftArm.clone();
+
+
+    leftArm.position.set(
+        -1,
+        1.55,
+        0
+    );
+
+
+    rightArm.position.set(
+        1,
+        1.55,
+        0
+    );
+
+
+    character.add(
+        leftArm,
+        rightArm
+    );
+
+
+    /*
+       LEGS
+    */
+
+    const legGeometry =
+        new THREE.CapsuleGeometry(
+            0.25,
+            0.75,
+            8,
+            12
+        );
+
+
+    const leftLeg =
+        new THREE.Mesh(
+            legGeometry,
+            darkMaterial
+        );
+
+
+    const rightLeg =
+        leftLeg.clone();
+
+
+    leftLeg.position.set(
+        -0.38,
+        0.42,
+        0
+    );
+
+
+    rightLeg.position.set(
+        0.38,
+        0.42,
+        0
+    );
+
+
+    character.add(
+        leftLeg,
+        rightLeg
+    );
+
+
+    /*
+       FEET
+    */
+
+    const footGeometry =
+        new THREE.SphereGeometry(
+            0.3,
+            16,
+            12
+        );
+
+
+    const leftFoot =
+        new THREE.Mesh(
+            footGeometry,
+            darkMaterial
+        );
+
+
+    const rightFoot =
+        leftFoot.clone();
+
+
+    leftFoot.scale.set(
+        1,
+        0.55,
+        1.25
+    );
+
+
+    rightFoot.scale.set(
+        1,
+        0.55,
+        1.25
+    );
+
+
+    leftFoot.position.set(
+        -0.38,
+        0.1,
+        -0.1
+    );
+
+
+    rightFoot.position.set(
+        0.38,
+        0.1,
+        -0.1
+    );
+
+
+    character.add(
+        leftFoot,
+        rightFoot
+    );
+
+
+    /*
+       HEDGEHOG SPINES
+    */
+
+    if (
+        data.type === "hedgehog"
+    ) {
+
+        for (
+            let i = 0;
+            i < 9;
+            i++
+        ) {
+
+            const spine =
+                new THREE.Mesh(
+                    new THREE.ConeGeometry(
+                        0.12,
+                        0.65,
+                        8
+                    ),
+                    plushMaterial
+                );
+
+
+            const angle =
+                -1.1 +
+                i * 0.275;
+
+
+            spine.position.set(
+                Math.sin(angle) * 0.75,
+                3.25 +
+                    Math.cos(angle) * 0.35,
+                0.18
+            );
+
+
+            spine.rotation.x =
+                -0.65;
+
+
+            spine.rotation.z =
+                -angle * 0.35;
+
+
+            character.add(
+                spine
+            );
+        }
+    }
+
+
+    /*
+       TIGER STRIPES
+    */
+
+    if (
+        data.type === "tiger"
+    ) {
+
+        const stripeMaterial =
+            new THREE.MeshStandardMaterial({
+                color: 0x242424
+            });
+
+
+        for (
+            let i = -2;
+            i <= 2;
+            i++
+        ) {
+
+            const stripe =
+                new THREE.Mesh(
+                    new THREE.BoxGeometry(
+                        0.08,
+                        0.55,
+                        0.05
+                    ),
+                    stripeMaterial
+                );
+
+
+            stripe.rotation.z =
+                0.25;
+
+
+            stripe.position.set(
+                i * 0.22,
+                2.95,
+                -1.01
+            );
+
+
+            character.add(
+                stripe
+            );
+        }
+    }
+
+
+    character.userData.parts = {
+
+        leftArm,
+
+        rightArm,
+
+        leftLeg,
+
+        rightLeg,
+
+        body,
+
+        head
+    };
+
+
+    character.userData.speed =
+        data.speed * 0.75;
+
+
+    return character;
+}
+
+
+/* =========================================================
+   NUMBER SPRITE
+   ========================================================= */
+
+function createNumberSprite(
+    text
+) {
+
+    const canvas =
+        document.createElement(
+            "canvas"
+        );
+
+
+    canvas.width = 256;
+    canvas.height = 256;
+
+
+    const context =
+        canvas.getContext("2d");
+
+
+    context.clearRect(
+        0,
+        0,
+        256,
+        256
+    );
+
+
+    context.fillStyle =
+        "#111";
+
+
+    context.font =
+        "bold 150px Arial";
+
+
+    context.textAlign =
+        "center";
+
+
+    context.textBaseline =
+        "middle";
+
+
+    context.fillText(
+        text,
+        128,
+        128
+    );
+
+
+    const texture =
+        new THREE.CanvasTexture(
+            canvas
+        );
+
+
+    const material =
+        new THREE.SpriteMaterial({
+            map: texture,
+            transparent: true
+        });
+
+
+    return new THREE.Sprite(
+        material
+    );
+}
+
+
+/* =========================================================
+   BALL
+   ========================================================= */
+
+function createBall() {
+
+    ball =
+        new THREE.Mesh(
+            new THREE.SphereGeometry(
+                0.43,
+                24,
+                18
+            ),
+
+            new THREE.MeshStandardMaterial({
+                color: 0xffffff,
+                roughness: 0.5
+            })
+        );
+
+
+    ball.castShadow = true;
+
+
+    ball.position.set(
+        0,
+        0.45,
+        7
+    );
+
+
+    ball.userData = {
+
+        velocity:
+            new THREE.Vector3(),
+
+        owner: null
+    };
+
+
+    scene.add(
+        ball
+    );
+}
+
+
+/* =========================================================
+   PLAYER SETUP
+   ========================================================= */
+
+function setupPlayers() {
+
+    clearPlayers();
+
+
+    /*
+       MAIN PLAYER
+    */
+
+    Game.player =
+        createSoftoy(
+            Game.selectedPlayer,
+            "softoy"
+        );
+
+
+    Game.player.position.set(
+        0,
+        0,
+        8
+    );
+
+
+    scene.add(
+        Game.player
+    );
+
+
+    Game.allPlayers.push(
+        Game.player
+    );
+
+
+    /*
+       TEAMMATES
+    */
+
+    for (
+        let i = 0;
+        i < 3;
+        i++
+    ) {
+
+        const data =
+            SOFTOYS[
+                (i + 1) %
+                SOFTOYS.length
+            ];
+
+
+        const teammate =
+            createSoftoy(
+                data,
+                "softoy"
+            );
+
+
+        teammate.position.set(
+            -8 + i * 8,
+            0,
+            8 - i * 5
+        );
+
+
+        scene.add(
+            teammate
+        );
+
+
+        Game.teammates.push(
+            teammate
+        );
+
+
+        Game.allPlayers.push(
+            teammate
+        );
+    }
+
+
+    /*
+       OPPONENTS
+    */
+
+    for (
+        let i = 0;
+        i < 4;
+        i++
+    ) {
+
+        const data =
+            SOFTOYS[
+                i %
+                SOFTOYS.length
+            ];
+
+
+        const opponent =
+            createSoftoy(
+                data,
+                "opponent"
+            );
+
+
+        opponent.position.set(
+            i % 2
+                ? -7
+                : 7,
+
+            0,
+
+            -8 -
+                Math.floor(i / 2) *
+                8
+        );
+
+
+        opponent.rotation.y =
+            Math.PI;
+
+
+        scene.add(
+            opponent
+        );
+
+
+        Game.opponents.push(
+            opponent
+        );
+
+
+        Game.allPlayers.push(
+            opponent
+        );
+    }
+
+
+    resetBall();
+}
+
+
+/* =========================================================
+   CLEAR PLAYERS
+   ========================================================= */
+
+function clearPlayers() {
+
+    Game.allPlayers.forEach(
+        player => {
+
+            scene.remove(
+                player
+            );
+        }
+    );
+
+
+    Game.allPlayers = [];
+
+    Game.teammates = [];
+
+    Game.opponents = [];
+
+    Game.player = null;
+}
+
+
+/* =========================================================
+   KEYBOARD
+   ========================================================= */
+
+function keyDown(event) {
+
+    keys[
+        event.key.toLowerCase()
+    ] = true;
+
+
+    if (
+        event.key === " "
+    ) {
+
+        event.preventDefault();
+
+        shoot();
+    }
+
+
+    if (
+        event.key.toLowerCase() ===
+        "p"
+    ) {
+
+        togglePause();
+    }
+}
+
+
+function keyUp(event) {
+
+    keys[
+        event.key.toLowerCase()
+    ] = false;
+}
+
+
+/* =========================================================
+   MOVEMENT
+   ========================================================= */
+
+function updatePlayer(
+    delta
+) {
+
+    if (
+        !Game.player
+    ) return;
+
+
+    const direction =
+        new THREE.Vector3();
+
+
+    if (
+        keys.w ||
+        keys.arrowup
+    ) {
+
+        direction.z -= 1;
+    }
+
+
+    if (
+        keys.s ||
+        keys.arrowdown
+    ) {
+
+        direction.z += 1;
+    }
+
+
+    if (
+        keys.a ||
+        keys.arrowleft
+    ) {
+
+        direction.x -= 1;
+    }
+
+
+    if (
+        keys.d ||
+        keys.arrowright
+    ) {
+
+        direction.x += 1;
+    }
+
+
+    direction.x +=
+        mobileInput.x;
+
+
+    direction.z +=
+        mobileInput.y;
+
+
+    if (
+        direction.lengthSq() >
+        0.01
+    ) {
+
+        direction.normalize();
+
+
+        const sprint =
+            keys.shift ||
+            mobileInput.sprint;
+
+
+        const speed =
+            Game.player.userData.speed *
+            (
+                sprint
+                    ? 1.45
+                    : 1
+            );
+
+
+        Game.player.position.addScaledVector(
+            direction,
+            speed * delta
+        );
+
+
+        Game.player.rotation.y =
+            Math.atan2(
+                direction.x,
+                direction.z
+            );
+
+
+        animateRunning(
+            Game.player,
+            delta,
+            sprint
+                ? 16
+                : 10
+        );
+
+    } else {
+
+        animateIdle(
+            Game.player,
+            delta
+        );
+    }
+
+
+    Game.player.position.x =
+        THREE.MathUtils.clamp(
+            Game.player.position.x,
+            -13.7,
+            13.7
+        );
+
+
+    Game.player.position.z =
+        THREE.MathUtils.clamp(
+            Game.player.position.z,
+            -22.7,
+            22.7
+        );
+}
+
+
+/* =========================================================
+   RUNNING ANIMATION
+   ========================================================= */
+
+function animateRunning(
+    character,
+    delta,
+    speed
+) {
+
+    character.userData.walkTime +=
+        delta * speed;
+
+
+    const swing =
+        Math.sin(
+            character.userData.walkTime
+        );
+
+
+    const parts =
+        character.userData.parts;
+
+
+    parts.leftLeg.rotation.x =
+        swing * 0.75;
+
+
+    parts.rightLeg.rotation.x =
+        -swing * 0.75;
+
+
+    parts.leftArm.rotation.x =
+        -swing * 0.45;
+
+
+    parts.rightArm.rotation.x =
+        swing * 0.45;
+
+
+    character.position.y =
+        Math.abs(swing) * 0.07;
+}
+
+
+/* =========================================================
+   IDLE
+   ========================================================= */
+
+function animateIdle(
+    character,
+    delta
+) {
+
+    character.userData.walkTime +=
+        delta * 2;
+
+
+    character.position.y =
+        Math.sin(
+            character.userData.walkTime
+        ) * 0.025;
+}
+
+
+/* =========================================================
+   BALL UPDATE
+   ========================================================= */
+
+function updateBall(
+    delta
+) {
+
+    if (
+        !Game.player
+    ) return;
+
+
+    /*
+       PLAYER HAS BALL
+    */
+
+    if (
+        ball.userData.owner ===
+        Game.player
+    ) {
+
+        const forward =
+            new THREE.Vector3(
+                0,
+                0,
+                -1
+            );
+
+
+        forward.applyQuaternion(
+            Game.player.quaternion
+        );
+
+
+        const target =
+            Game.player.position
+                .clone()
+                .addScaledVector(
+                    forward,
+                    1.35
+                );
+
+
+        target.y =
+            0.45;
+
+
+        ball.position.lerp(
+            target,
+            0.25
+        );
+
+
+        ball.userData.velocity.set(
+            0,
+            0,
+            0
+        );
+
+
+        return;
+    }
+
+
+    /*
+       BALL PHYSICS
+    */
+
+    ball.userData.velocity.y -=
+        9.8 * delta;
+
+
+    ball.position.addScaledVector(
+        ball.userData.velocity,
+        delta
+    );
+
+
+    ball.userData.velocity.multiplyScalar(
+        Math.pow(
+            0.985,
+            delta * 60
+        )
+    );
+
+
+    /*
+       BOUNCE
+    */
+
+    if (
+        ball.position.y <
+        0.45
+    ) {
+
+        ball.position.y =
+            0.45;
+
+
+        if (
+            Math.abs(
+                ball.userData.velocity.y
+            ) > 0.5
+        ) {
+
+            ball.userData.velocity.y *=
+                -0.35;
+
+        } else {
+
+            ball.userData.velocity.y =
+                0;
+        }
+    }
+
+
+    /*
+       PICK UP BALL
+    */
+
+    if (
+        ball.userData.velocity.length() <
+        2 &&
+
+        ball.position.distanceTo(
+            Game.player.position
+        ) < 1.7
+    ) {
+
+        ball.userData.owner =
+            Game.player;
+    }
+}
+
+
+/* =========================================================
+   SHOOT
+   ========================================================= */
+
+function shoot() {
+
+    if (
+        !Game.running ||
+        Game.paused ||
+        !Game.player
+    ) return;
+
+
+    if (
+        ball.userData.owner !==
+        Game.player
+    ) return;
+
+
+    const direction =
+        new THREE.Vector3(
+            0,
+            0,
+            -1
+        );
+
+
+    direction.applyQuaternion(
+        Game.player.quaternion
+    );
+
+
+    direction.normalize();
+
+
+    ball.userData.owner =
+        null;
+
+
+    ball.position.addScaledVector(
+        direction,
+        0.5
+    );
+
+
+    const power =
+        16 +
+        Game.selectedPlayer.shooting *
+        1.1;
+
+
+    ball.userData.velocity.copy(
+        direction.multiplyScalar(
+            power
+        )
+    );
+
+
+    ball.userData.velocity.y =
+        3.2;
+
+
+    kickAnimation();
+}
+
+
+/* =========================================================
+   KICK ANIMATION
+   ========================================================= */
+
+function kickAnimation() {
+
+    if (
+        !Game.player
+    ) return;
+
+
+    const leg =
+        Game.player.userData.parts
+            .rightLeg;
+
+
+    leg.rotation.x =
+        -1.5;
+
+
+    setTimeout(
+        () => {
+
+            leg.rotation.x =
+                0;
+
+        },
+        180
+    );
+}
+
+
+/* =========================================================
+   OPPONENT AI
+   ========================================================= */
+
+function updateOpponents(
+    delta
+) {
+
+    Game.opponents.forEach(
+        opponent => {
+
+            const target =
+                ball.position
+                    .clone();
+
+
+            const direction =
+                target.sub(
+                    opponent.position
+                );
+
+
+            direction.y =
+                0;
+
+
+            if (
+                direction.length() >
+                1.3
+            ) {
+
+                direction.normalize();
+
+
+                opponent.position.addScaledVector(
+                    direction,
+                    3.2 * delta
+                );
+
+
+                opponent.rotation.y =
+                    Math.atan2(
+                        direction.x,
+                        direction.z
+                    );
+
+
+                animateRunning(
+                    opponent,
+                    delta,
+                    9
+                );
+            }
+
+
+            opponent.position.x =
+                THREE.MathUtils.clamp(
+                    opponent.position.x,
+                    -13.7,
+                    13.7
+                );
+
+
+            opponent.position.z =
+                THREE.MathUtils.clamp(
+                    opponent.position.z,
+                    -22.7,
+                    22.7
+                );
+
+
+            /*
+               STEAL BALL
+            */
+
+            if (
+                opponent.position.distanceTo(
+                    ball.position
+                ) < 1.25 &&
+
+                ball.userData.owner !==
+                    Game.player
+            ) {
+
+                if (
+                    Math.random() <
+                    0.015
+                ) {
+
+                    ball.userData.owner =
+                        opponent;
+                }
+            }
+        }
+    );
+
+
+    /*
+       OPPONENT WITH BALL
+    */
+
+    const owner =
+        Game.opponents.find(
+            opponent =>
+                ball.userData.owner ===
+                opponent
+        );
+
+
+    if (
+        owner
+    ) {
+
+        const forward =
+            new THREE.Vector3(
+                0,
+                0,
+                1
+            );
+
+
+        forward.applyQuaternion(
+            owner.quaternion
+        );
+
+
+        ball.position.copy(
+            owner.position
+        );
+
+
+        ball.position.addScaledVector(
+            forward,
+            1.2
+        );
+
+
+        ball.position.y =
+            0.45;
+
+
+        /*
+           OPPONENT SHOOTS
+        */
+
+        if (
+            owner.position.z >
+            17
+        ) {
+
+            ball.userData.owner =
+                null;
+
+
+            ball.userData.velocity.set(
+                0,
+                2,
+                12
+            );
+        }
+    }
+}
+
+
+/* =========================================================
+   GOAL DETECTION
+   ========================================================= */
+
+function checkGoal() {
+
+    const now =
+        Date.now();
+
+
+    if (
+        now -
+            Game.lastGoalTime <
+        1000
+    ) return;
+
+
+    /*
+       SOFTOY SCORES
+    */
+
+    if (
+        ball.position.z <
+        -24.7
+    ) {
+
+        Game.lastGoalTime =
+            now;
+
+
+        Game.score.softoy++;
+
+
+        showGoalMessage(
+            "⚽ GOAL!"
+        );
+
+
+        resetBall();
+
+        updateUI();
+
+
+        return;
+    }
+
+
+    /*
+       OPPONENT SCORES
+    */
+
+    if (
+        ball.position.z >
+        24.7
+    ) {
+
+        Game.lastGoalTime =
+            now;
+
+
+        Game.score.opponent++;
+
+
+        showGoalMessage(
+            "OPPONENT GOAL"
+        );
+
+
+        resetBall();
+
+        updateUI();
+    }
+}
+
+
+/* =========================================================
+   RESET BALL
+   ========================================================= */
+
+function resetBall() {
+
+    ball.position.set(
+        0,
+        0.45,
+        7
+    );
+
+
+    ball.userData.velocity.set(
+        0,
+        0,
+        0
+    );
+
+
+    ball.userData.owner =
+        null;
+}
+
+
+/* =========================================================
+   TIMER
+   ========================================================= */
+
+let timerAccumulator = 0;
+
+
+function updateMatchTimer(
+    delta
+) {
+
+    if (
+        !Game.running ||
+        Game.paused
+    ) return;
+
+
+    timerAccumulator +=
+        delta;
+
+
+    if (
+        timerAccumulator >= 1
+    ) {
+
+        timerAccumulator = 0;
+
+
+        Game.matchTime--;
+
+
+        if (
+            Game.matchTime <=
+            0
+        ) {
+
+            Game.matchTime =
+                0;
+
+
+            finishMatch();
+        }
+
+
+        updateUI();
+    }
+}
+
+
+/* =========================================================
+   FINISH MATCH
+   ========================================================= */
+
+function finishMatch() {
+
+    Game.running =
+        false;
+
+
+    const won =
+        Game.score.softoy >
+        Game.score.opponent;
+
+
+    if (
+        won
+    ) {
+
+        Game.rank =
+            Math.min(
+                Game.rank + 1,
+                RANKS.length
+            );
+    }
+
+
+    showResult(
+        won
+    );
+}
+
+
+/* =========================================================
+   RANK SYSTEM
+   ========================================================= */
+
+function getRankName() {
+
+    return RANKS[
+        Math.min(
+            Game.rank - 1,
+            RANKS.length - 1
+        )
+    ];
+}
+
+
+/* =========================================================
+   MAIN MENU
+   ========================================================= */
+
+function createMenu() {
+
+    const menu =
+        document.createElement(
+            "div"
+        );
+
+
+    menu.id =
+        "softoyMenu";
+
+
+    menu.style.position =
+        "fixed";
+
+
+    menu.style.inset =
+        "0";
+
+
+    menu.style.zIndex =
+        "50";
+
+
+    menu.style.display =
+        "flex";
+
+
+    menu.style.flexDirection =
+        "column";
+
+
+    menu.style.alignItems =
+        "center";
+
+
+    menu.style.justifyContent =
+        "center";
+
+
+    menu.style.background =
+        "linear-gradient(#07131df2,#07131df8)";
+
+
+    menu.style.color =
+        "white";
+
+
+    menu.style.fontFamily =
+        "Arial";
+
+
+    menu.innerHTML = `
+
+        <h1 style="
+            font-size:50px;
+            text-align:center;
+            margin:10px;
+        ">
+            🧸 SOFTOY<br>
+            ⚽ FOOTBALL
+        </h1>
+
+        <p>
+            3D SOFTOY FOOTBALL
+        </p>
+
+        <button id="playButton"
+            style="
+            padding:16px 40px;
+            font-size:22px;
+            font-weight:bold;
+            margin:8px;
+            border-radius:15px;
+        ">
+            PLAY
+        </button>
+
+        <button id="playersButton"
+            style="
+            padding:14px 30px;
+            font-size:18px;
+            margin:8px;
+            border-radius:15px;
+        ">
+            PLAYERS
+        </button>
+    `;
+
+
+    document.body.appendChild(
+        menu
+    );
+
+
+    document.getElementById(
+        "playButton"
+    ).onclick =
+        showPlayerSelection;
+
+
+    document.getElementById(
+        "playersButton"
+    ).onclick =
+        showPlayerSelection;
+}
+
+
+/* =========================================================
+   PLAYER SELECTION
+   ========================================================= */
+
+function showPlayerSelection() {
+
+    const old =
+        document.getElementById(
+            "playerSelection"
+        );
+
+
+    if (
+        old
+    ) old.remove();
+
+
+    const screen =
+        document.createElement(
+            "div"
+        );
+
+
+    screen.id =
+        "playerSelection";
+
+
+    screen.style.position =
+        "fixed";
+
+
+    screen.style.inset =
+        "0";
+
+
+    screen.style.zIndex =
+        "50";
+
+
+    screen.style.display =
+        "flex";
+
+
+    screen.style.flexDirection =
+        "column";
+
+
+    screen.style.alignItems =
+        "center";
+
+
+    screen.style.justifyContent =
+        "center";
+
+
+    screen.style.background =
+        "#07131df8";
+
+
+    screen.style.color =
+        "white";
+
+
+    screen.style.fontFamily =
+        "Arial";
+
+
+    screen.innerHTML = `
+
+        <h1>
+            CHOOSE YOUR SOFTOY
+        </h1>
+
+        <div id="playerCards"
+            style="
+            display:grid;
+            grid-template-columns:
+            repeat(2, minmax(140px,220px));
+            gap:12px;
+            width:92%;
+            max-width:500px;
+        ">
+        </div>
+
+        <button
+            id="startMatchButton"
+            style="
+            padding:16px 30px;
+            margin:20px;
+            font-size:20px;
+            font-weight:bold;
+            border-radius:15px;
+        ">
+            START MATCH
+        </button>
+
+        <button
+            id="backMenuButton"
+            style="
+            padding:12px 25px;
+            border-radius:15px;
+        ">
+            BACK
+        </button>
+    `;
+
+
+    document.body.appendChild(
+        screen
+    );
+
+
+    const cards =
+        document.getElementById(
+            "playerCards"
+        );
+
+
+    SOFTOYS.forEach(
+        data => {
+
+            const card =
+                document.createElement(
+                    "button"
+                );
+
+
+            card.style.padding =
+                "15px";
+
+
+            card.style.borderRadius =
+                "18px";
+
+
+            card.style.background =
+                "#ffffff18";
+
+
+            card.style.color =
+                "white";
+
+
+            card.style.border =
+                Game.selectedPlayer.id ===
+                data.id
+                    ? "3px solid #39d353"
+                    : "2px solid #ffffff30";
+
+
+            card.innerHTML = `
+
+                <div style="
+                    font-size:65px;
+                ">
+                    ${
+                        data.type ===
+                        "hedgehog"
+                            ? "🦔"
+                            :
+                        data.type ===
+                        "tiger"
+                            ? "🐯"
+                            : "🧸"
+                    }
+                </div>
+
+                <strong>
+                    ${data.name}
+                    #${data.number}
+                </strong>
+
+                <br>
+
+                <small>
+                    ⚡ ${data.speed}
+                    &nbsp;
+                    ⚽ ${data.shooting}
+                </small>
+            `;
+
+
+            card.onclick =
+                () => {
+
+                    Game.selectedPlayer =
+                        data;
+
+
+                    showPlayerSelection();
+                };
+
+
+            cards.appendChild(
+                card
+            );
+        }
+    );
+
+
+    document.getElementById(
+        "startMatchButton"
+    ).onclick =
+        startMatch;
+
+
+    document.getElementById(
+        "backMenuButton"
+    ).onclick =
+        () => {
+
+            screen.remove();
+
+            document.getElementById(
+                "softoyMenu"
+            ).style.display =
+                "flex";
+        };
+
+
+    document.getElementById(
+        "softoyMenu"
+    ).style.display =
+        "none";
+}
+
+
+/* =========================================================
+   START MATCH
+   ========================================================= */
+
+function startMatch() {
+
+    const menu =
+        document.getElementById(
+            "softoyMenu"
+        );
+
+
+    if (
+        menu
+    ) {
+
+        menu.style.display =
+            "none";
+    }
+
+
+    const selection =
+        document.getElementById(
+            "playerSelection"
+        );
+
+
+    if (
+        selection
+    ) {
+
+        selection.remove();
+    }
+
+
+    const result =
+        document.getElementById(
+            "matchResult"
+        );
+
+
+    if (
+        result
+    ) {
+
+        result.remove();
+    }
+
+
+    Game.screen =
+        "match";
+
+
+    Game.running =
+        true;
+
+
+    Game.paused =
+        false;
+
+
+    Game.matchTime =
+        180;
+
+
+    Game.score.softoy =
+        0;
+
+
+    Game.score.opponent =
+        0;
+
+
+    setupPlayers();
+
+
+    createGameUI();
+
+
+    updateUI();
+}
+
+
+/* =========================================================
+   GAME UI
+   ========================================================= */
+
+function createGameUI() {
+
+    let ui =
+        document.getElementById(
+            "gameUI"
+        );
+
+
+    if (
+        ui
+    ) {
+
+        ui.remove();
+    }
+
+
+    ui =
+        document.createElement(
+            "div"
+        );
+
+
+    ui.id =
+        "gameUI";
+
+
+    ui.style.position =
+        "fixed";
+
+
+    ui.style.top =
+        "15px";
+
+
+    ui.style.left =
+        "50%";
+
+
+    ui.style.transform =
+        "translateX(-50%)";
+
+
+    ui.style.zIndex =
+        "20";
+
+
+    ui.style.color =
+        "white";
+
+
+    ui.style.textAlign =
+        "center";
+
+
+    ui.style.fontFamily =
+        "Arial";
+
+
+    ui.style.fontWeight =
+        "bold";
+
+
+    ui.style.textShadow =
+        "0 2px 5px black";
+
+
+    ui.innerHTML = `
+
+        <div id="scoreText"
+            style="font-size:22px">
+        </div>
+
+        <div id="timerText"
+            style="font-size:18px">
+        </div>
+
+        <div id="rankText"
+            style="font-size:14px">
+        </div>
+    `;
+
+
+    document.body.appendChild(
+        ui
+    );
+
+
+    createPauseButton();
+
+    createMobileControlsUI();
+}
+
+
+/* =========================================================
+   UPDATE UI
+   ========================================================= */
+
+function updateUI() {
+
+    const score =
+        document.getElementById(
+            "scoreText"
+        );
+
+
+    const timer =
+        document.getElementById(
+            "timerText"
+        );
+
+
+    const rank =
+        document.getElementById(
+            "rankText"
+        );
+
+
+    if (
+        score
+    ) {
+
+        score.innerText =
+            `SOFTOY ${Game.score.softoy} - ${Game.score.opponent} OPPONENT`;
+    }
+
+
+    if (
+        timer
+    ) {
+
+        const seconds =
+            Math.max(
+                0,
+                Math.ceil(
+                    Game.matchTime
+                )
+            );
+
+
+        const minutes =
+            Math.floor(
+                seconds / 60
+            );
+
+
+        const remaining =
+            seconds % 60;
+
+
+        timer.innerText =
+            `${String(minutes).padStart(2,"0")}:${String(remaining).padStart(2,"0")}`;
+    }
+
+
+    if (
+        rank
+    ) {
+
+        rank.innerText =
+            `RANK: ${getRankName()}`;
+    }
+}
+
+
+/* =========================================================
+   PAUSE
+   ========================================================= */
+
+function createPauseButton() {
+
+    const old =
+        document.getElementById(
+            "pauseButton"
+        );
+
+
+    if (
+        old
+    ) old.remove();
+
+
+    const button =
+        document.createElement(
+            "button"
+        );
+
+
+    button.id =
+        "pauseButton";
+
+
+    button.innerText =
+        "Ⅱ";
+
+
+    button.style.position =
+        "fixed";
+
+
+    button.style.top =
+        "15px";
+
+
+    button.style.right =
+        "15px";
+
+
+    button.style.zIndex =
+        "30";
+
+
+    button.style.width =
+        "48px";
+
+
+    button.style.height =
+        "48px";
+
+
+    button.style.borderRadius =
+        "50%";
+
+
+    button.style.fontWeight =
+        "bold";
+
+
+    document.body.appendChild(
+        button
+    );
+
+
+    button.onclick =
+        togglePause;
+}
+
+
+function togglePause() {
+
+    if (
+        !Game.running
+    ) return;
+
+
+    Game.paused =
+        !Game.paused;
+
+
+    const button =
+        document.getElementById(
+            "pauseButton"
+        );
+
+
+    if (
+        button
+    ) {
+
+        button.innerText =
+            Game.paused
+                ? "▶"
+                : "Ⅱ";
+    }
+
+
+    showGoalMessage(
+        Game.paused
+            ? "PAUSED"
+            : "RESUMED"
+    );
+}
+
+
+/* =========================================================
+   MOBILE CONTROLS
+   ========================================================= */
+
+function createMobileControls() {
+
+    // Controls are created after the match starts.
+}
+
+
+function createMobileControlsUI() {
+
+    const old =
+        document.getElementById(
+            "mobileControls"
+        );
+
+
+    if (
+        old
+    ) old.remove();
+
+
+    const controls =
+        document.createElement(
+            "div"
+        );
+
+
+    controls.id =
+        "mobileControls";
+
+
+    controls.style.position =
+        "fixed";
+
+
+    controls.style.inset =
+        "0";
+
+
+    controls.style.zIndex =
+        "25";
+
+
+    controls.style.pointerEvents =
+        "none";
+
+
+    controls.innerHTML = `
+
+        <div id="joystick"
+            style="
+            position:absolute;
+            left:25px;
+            bottom:25px;
+            width:130px;
+            height:130px;
+            border:3px solid #ffffff88;
+            border-radius:50%;
+            background:#ffffff14;
+            pointer-events:auto;
+        ">
+
+            <div id="joystickStick"
+                style="
+                position:absolute;
+                width:58px;
+                height:58px;
+                left:33px;
+                top:33px;
+                border-radius:50%;
+                background:#ffffff66;
+                border:2px solid white;
+            ">
+            </div>
+
+        </div>
+
+
+        <button id="sprintButton"
+            style="
+            position:absolute;
+            right:125px;
+            bottom:48px;
+            width:68px;
+            height:68px;
+            border-radius:50%;
+            font-size:25px;
+            pointer-events:auto;
+        ">
+            ⚡
+        </button>
+
+
+        <button id="shootButton"
+            style="
+            position:absolute;
+            right:22px;
+            bottom:25px;
+            width:95px;
+            height:95px;
+            border-radius:50%;
+            font-size:16px;
+            font-weight:bold;
+            pointer-events:auto;
+        ">
+            ⚽<br>
+            SHOOT
+        </button>
+    `;
+
+
+    document.body.appendChild(
+        controls
+    );
+
+
+    setupJoystick();
+
+    setupSprintButton();
+
+    setupShootButton();
+}
+
+
+/* =========================================================
+   JOYSTICK
+   ========================================================= */
+
+function setupJoystick() {
+
+    const joystick =
+        document.getElementById(
+            "joystick"
+        );
+
+
+    const stick =
+        document.getElementById(
+            "joystickStick"
+        );
+
+
+    let active =
+        false;
+
+
+    function move(
+        event
+    ) {
+
+        if (
+            !active
+        ) return;
+
+
+        const rect =
+            joystick.getBoundingClientRect();
+
+
+        const touch =
+            event.touches[0];
+
+
+        let x =
+            (
+                touch.clientX -
+                (
+                    rect.left +
+                    rect.width / 2
+                )
+            ) /
+            (
+                rect.width / 2
+            );
+
+
+        let y =
+            (
+                touch.clientY -
+                (
+                    rect.top +
+                    rect.height / 2
+                )
+            ) /
+            (
+                rect.height / 2
+            );
+
+
+        const length =
+            Math.hypot(
+                x,
+                y
+            );
+
+
+        if (
+            length > 1
+        ) {
+
+            x /= length;
+
+            y /= length;
+        }
+
+
+        mobileInput.x =
+            x;
+
+
+        mobileInput.y =
+            y;
+
+
+        stick.style.transform =
+            `translate(${x * 35}px, ${y * 35}px)`;
+    }
+
+
+    joystick.addEventListener(
+        "touchstart",
+        event => {
+
+            active =
+                true;
+
+
+            move(
+                event
+            );
+        },
+        {
+            passive: false
+        }
+    );
+
+
+    joystick.addEventListener(
+        "touchmove",
+        event => {
+
+            event.preventDefault();
+
+
+            move(
+                event
+            );
+        },
+        {
+            passive: false
+        }
+    );
+
+
+    joystick.addEventListener(
+        "touchend",
+        () => {
+
+            active =
+                false;
+
+
+            mobileInput.x =
+                0;
+
+
+            mobileInput.y =
+                0;
+
+
+            stick.style.transform =
+                "";
+        }
+    );
+}
+
+
+/* =========================================================
+   SPRINT BUTTON
+   ========================================================= */
+
+function setupSprintButton() {
+
+    const button =
+        document.getElementById(
+            "sprintButton"
+        );
+
+
+    button.addEventListener(
+        "touchstart",
+        event => {
+
+            event.preventDefault();
+
+            mobileInput.sprint =
+                true;
+        },
+        {
+            passive: false
+        }
+    );
+
+
+    button.addEventListener(
+        "touchend",
+        () => {
+
+            mobileInput.sprint =
+                false;
+        }
+    );
+}
+
+
+/* =========================================================
+   SHOOT BUTTON
+   ========================================================= */
+
+function setupShootButton() {
+
+    const button =
+        document.getElementById(
+            "shootButton"
+        );
+
+
+    button.addEventListener(
+        "touchstart",
+        event => {
+
+            event.preventDefault();
+
+            shoot();
+        },
+        {
+            passive: false
+        }
+    );
+}
+
+
+/* =========================================================
+   GOAL MESSAGE
+   ========================================================= */
+
+function showGoalMessage(
+    text
+) {
+
+    let message =
+        document.getElementById(
+            "goalMessage"
+        );
+
+
+    if (
+        !message
+    ) {
+
+        message =
+            document.createElement(
+                "div"
+            );
+
+
+        message.id =
+            "goalMessage";
+
+
+        message.style.position =
+            "fixed";
+
+
+        message.style.top =
+            "45%";
+
+
+        message.style.left =
+            "50%";
+
+
+        message.style.transform =
+            "translate(-50%,-50%)";
+
+
+        message.style.zIndex =
+            "40";
+
+
+        message.style.color =
+            "white";
+
+
+        message.style.fontSize =
+            "45px";
+
+
+        message.style.fontWeight =
+            "bold";
+
+
+        message.style.textShadow =
+            "0 4px 10px black";
+
+
+        message.style.pointerEvents =
+            "none";
+
+
+        document.body.appendChild(
+            message
+        );
+    }
+
+
+    message.innerText =
+        text;
+
+
+    message.style.opacity =
+        "1";
+
+
+    setTimeout(
+        () => {
+
+            message.style.opacity =
+                "0";
+
+        },
+        900
+    );
+}
+
+
+/* =========================================================
+   RESULT SCREEN
+   ========================================================= */
+
+function showResult(
+    won
+) {
+
+    const old =
+        document.getElementById(
+            "matchResult"
+        );
+
+
+    if (
+        old
+    ) old.remove();
+
+
+    const result =
+        document.createElement(
+            "div"
+        );
+
+
+    result.id =
+        "matchResult";
+
+
+    result.style.position =
+        "fixed";
+
+
+    result.style.inset =
+        "0";
+
+
+    result.style.zIndex =
+        "50";
+
+
+    result.style.display =
+        "flex";
+
+
+    result.style.flexDirection =
+        "column";
+
+
+    result.style.alignItems =
+        "center";
+
+
+    result.style.justifyContent =
+        "center";
+
+
+    result.style.background =
+        "#07131df5";
+
+
+    result.style.color =
+        "white";
+
+
+    result.style.fontFamily =
+        "Arial";
+
+
+    result.innerHTML = `
+
+        <h1>
+            ${
+                won
+                    ? "🏆 VICTORY!"
+                    : "FULL TIME"
+            }
+        </h1>
+
+        <h2>
+            ${Game.score.softoy}
+            -
+            ${Game.score.opponent}
+        </h2>
+
+        <p>
+            RANK:
+            ${getRankName()}
+        </p>
+
+        <button id="againButton"
+            style="
+            padding:16px 30px;
+            font-size:20px;
+            font-weight:bold;
+            border-radius:15px;
+        ">
+            PLAY AGAIN
+        </button>
+
+        <button id="menuButton"
+            style="
+            padding:13px 25px;
+            margin-top:10px;
+            border-radius:15px;
+        ">
+            MAIN MENU
+        </button>
+    `;
+
+
+    document.body.appendChild(
+        result
+    );
+
+
+    document.getElementById(
+        "againButton"
+    ).onclick =
+        startMatch;
+
+
+    document.getElementById(
+        "menuButton"
+    ).onclick =
+        showMainMenu;
+}
+
+
+/* =========================================================
+   MAIN MENU RETURN
+   ========================================================= */
+
+function showMainMenu() {
+
+    Game.running =
+        false;
+
+
+    Game.paused =
+        false;
+
+
+    clearPlayers();
+
+
+    const result =
+        document.getElementById(
+            "matchResult"
+        );
+
+
+    if (
+        result
+    ) result.remove();
+
+
+    const controls =
+        document.getElementById(
+            "mobileControls"
+        );
+
+
+    if (
+        controls
+    ) controls.remove();
+
+
+    const pause =
+        document.getElementById(
+            "pauseButton"
+        );
+
+
+    if (
+        pause
+    ) pause.remove();
+
+
+    const selection =
+        document.getElementById(
+            "playerSelection"
+        );
+
+
+    if (
+        selection
+    ) selection.remove();
+
+
+    const menu =
+        document.getElementById(
+            "softoyMenu"
+        );
+
+
+    if (
+        menu
+    ) {
+
+        menu.style.display =
+            "flex";
+    }
+}
+
+
+/* =========================================================
+   RESIZE
+   ========================================================= */
+
+function resize() {
+
+    camera.aspect =
+        window.innerWidth /
+        window.innerHeight;
+
+
+    camera.updateProjectionMatrix();
+
+
+    renderer.setSize(
+        window.innerWidth,
+        window.innerHeight
+    );
+}
+
+
+/* =========================================================
+   CAMERA
+   ========================================================= */
+
+function updateCamera(
+    delta
+) {
+
+    if (
+        !Game.player
+    ) return;
+
+
+    const desired =
+        Game.player.position
+            .clone();
+
+
+    desired.y +=
+        7;
+
+
+    desired.z +=
+        10;
+
+
+    camera.position.lerp(
+        desired,
+        1 -
+        Math.pow(
+            0.001,
+            delta
+        )
+    );
+
+
+    camera.lookAt(
+        Game.player.position.x,
+        Game.player.position.y +
+            1.3,
+        Game.player.position.z
+    );
+}
+
+
+/* =========================================================
+   GAME LOOP
+   ========================================================= */
+
+function gameLoop() {
+
+    requestAnimationFrame(
+        gameLoop
+    );
+
+
+    const delta =
+        Math.min(
+            clock.getDelta(),
+            0.05
+        );
+
+
+    if (
+        Game.running &&
+        !Game.paused
+    ) {
+
+        updatePlayer(
+            delta
+        );
+
+
+        updateBall(
+            delta
+        );
+
+
+        updateOpponents(
+            delta
+        );
+
+
+        checkGoal();
+
+
+        updateMatchTimer(
+            delta
+        );
+    }
+
+
+    updateCamera(
+        delta
+    );
+
+
+    renderer.render(
+        scene,
+        camera
+    );
+}
+
+
+/* =========================================================
+   READY
+   ========================================================= */
+
+console.log(
+    "SOFTOY FOOTBALL 3D READY!"
+);
